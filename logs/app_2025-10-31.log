@@ -1,0 +1,50 @@
+2025-10-31 13:31:29.707 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:32:26.073 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:32:27.518 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 13:32:27.518 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 13:32:27.518 | INFO     | core.analytics:compute_pair_analytics:370 | Computing analytics for BTCUSDT-ETHUSDT @ 1s
+2025-10-31 13:32:41.463 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:32:42.840 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 13:32:42.840 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 13:34:36.051 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:34:37.752 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 13:34:37.752 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 13:34:37.762 | INFO     | core.analytics:compute_pair_analytics:405 | Computing analytics for BTCUSDT-ETHUSDT @ 1s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_hedge_ratio:69 | Not enough price data for hedge ratio: %s/%s window=%s len_a=%s len_b=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_hedge_ratio:69 | Not enough price data for hedge ratio: %s/%s window=%s len_a=%s len_b=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_spread:180 | No hedge ratios computed for spread: %s/%s window=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_hedge_ratio:69 | Not enough price data for hedge ratio: %s/%s window=%s len_a=%s len_b=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_spread:180 | No hedge ratios computed for spread: %s/%s window=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_zscore:245 | Insufficient spread history for zscore: %s/%s window=%s len_spreads=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_rolling_correlation:315 | Insufficient overlapping prices for rolling corr: %s/%s window=%s len_df=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_hedge_ratio:69 | Not enough price data for hedge ratio: %s/%s window=%s len_a=%s len_b=%s
+2025-10-31 13:34:37.762 | WARNING  | core.analytics:compute_spread:180 | No hedge ratios computed for spread: %s/%s window=%s
+2025-10-31 13:35:51.045 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:35:53.176 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 13:35:53.180 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 13:35:53.180 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for BTCUSDT
+2025-10-31 13:35:53.180 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for ETHUSDT
+2025-10-31 13:35:53.182 | INFO     | core.analytics:compute_pair_analytics:405 | Computing analytics for BTCUSDT-ETHUSDT @ 1s
+2025-10-31 13:37:36.377 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:37:38.196 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 13:37:38.206 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 13:37:38.206 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for BTCUSDT
+2025-10-31 13:37:38.206 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for ETHUSDT
+2025-10-31 13:37:38.206 | INFO     | core.analytics:compute_pair_analytics:441 | Computing analytics for BTCUSDT-ETHUSDT @ 1s
+2025-10-31 13:37:59.485 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 13:38:00.896 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 13:38:00.896 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 13:38:00.896 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for BTCUSDT
+2025-10-31 13:38:00.896 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for ETHUSDT
+2025-10-31 13:38:00.896 | INFO     | core.analytics:compute_pair_analytics:441 | Computing analytics for BTCUSDT-ETHUSDT @ 1s
+2025-10-31 13:38:01.022 | WARNING  | core.analytics:compute_zscore:256 | Insufficient spread history for zscore: BTCUSDT/ETHUSDT window=20 len_spreads=1
+2025-10-31 19:17:07.815 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 19:17:09.107 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 19:17:09.118 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 19:17:09.118 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for BTCUSDT
+2025-10-31 19:18:51.674 | INFO     | core.data_manager:__init__:50 | Data Manager initialized
+2025-10-31 19:18:52.978 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized
+2025-10-31 19:18:52.984 | INFO     | core.alerts_engine:__init__:61 | Alerts Engine initialized
+2025-10-31 19:18:52.984 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for BTCUSDT
+2025-10-31 19:18:52.984 | INFO     | core.data_manager:clear_buffer:223 | Cleared buffer for ETHUSDT
+2025-10-31 19:18:52.986 | INFO     | core.analytics:__init__:31 | Analytics Engine initialized

@@ -23,7 +23,6 @@ const StatsCardComponent = ({
   const isPositive = change !== undefined ? change > 0 : false;
   const isNegative = change !== undefined ? change < 0 : false;
   
-  // Get status based on title and value
   const getStatus = () => {
     if (title === 'Z-Score') {
       const absZ = Math.abs(value);
@@ -92,27 +91,21 @@ const StatsCardComponent = ({
   );
 };
 
-// Memoize with custom comparison - only re-render if value changes significantly
 export const StatsCard = memo(StatsCardComponent, (prevProps, nextProps) => {
-  // Check if title changed
   if (prevProps.title !== nextProps.title) return false;
   
-  // Check if value changed significantly (more than 0.0001)
   const valueThreshold = 0.0001;
   if (Math.abs(prevProps.value - nextProps.value) > valueThreshold) return false;
   
-  // Check if change percentage changed significantly
   if (prevProps.change !== undefined && nextProps.change !== undefined) {
     if (Math.abs(prevProps.change - nextProps.change) > 0.01) return false;
   }
   
-  // Check if other props changed
   if (prevProps.prefix !== nextProps.prefix || 
       prevProps.suffix !== nextProps.suffix || 
       prevProps.decimals !== nextProps.decimals) {
     return false;
   }
   
-  // Props are equal enough - skip re-render
   return true;
 });

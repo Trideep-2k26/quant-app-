@@ -1,0 +1,496 @@
+import { useCallback, useEffect, useMemo, useState, memo, useRef } from 'react';
+import { createChart, ColorType, IChartApi, CandlestickData, HistogramData, Time, CandlestickSeriesPartialOptions, HistogramSeriesPartialOptions } from 'lightweight-charts';
+import { ArrowDownRight, ArrowUpRight, Dot, Star, StarOff } from 'lucide-react';
+
+import { Card, CardContent, CardHeader } from './ui/card';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { AssetLogo } from './AssetLogo';
+
+import { cn } from '@/lib/utils';
+import {
+  formatCompactCurrency,
+  formatCompactNumber,
+  formatNumber,
+  formatPrice,
+  formatSignedPercent,
+} from '@/utils/formatters';
+import { getAssetMeta } from '@/utils/assets';
+
+const DEFAULT_TIMEFRAME_OPTIONS = [
+  { label: '1s', value: '1s' },
+  { label: '1m', value: '1m' },
+  { label: '5m', value: '5m' },
+  { label: '15m', value: '15m' },
+  { label: '30m', value: '30m' },
+  { label: '1h', value: '1h' },
+  { label: '14h', value: '14h' },
+] as const;
+
+type TimeframeOption = (typeof DEFAULT_TIMEFRAME_OPTIONS)[number];
+
+type PriceData = {
+  ts: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
+type TickerSnapshot = {
+  priceChange: number;
+  priceChangePercent: number;
+  lastPrice: number;
+  openPrice: number;
+  highPrice: number;
+  lowPrice: number;
+  volume: number;
+  quoteVolume: number;
+};
+
+interface PriceChartProps {
+  data: PriceData[];
+  symbol: string;
+  timeframe: string;
+  onTimeframeChange?: (value: string) => void;
+  timeframeOptions?: ReadonlyArray<TimeframeOption>;
+  isLive?: boolean;
+  onStartLive?: () => void;
+  onStopLive?: () => void;
+  showLiveToggle?: boolean;
+  tickerData?: TickerSnapshot | null;
+}
+
+const formatTimeToTimestamp = (dateString: string): Time => {
+  return Math.floor(new Date(dateString).getTime() / 1000) as Time;
+};
+
+interface ChartCanvasProps {
+  data: PriceData[];
+  symbol: string;
+  timeframe: string;
+}
+
+const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candlestickSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
+
+  // Initialize chart
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#161a1e' },
+        textColor: '#848e9c',
+        fontSize: 12,
+      },
+      grid: {
+        vertLines: { color: 'rgba(43, 47, 53, 0.5)' },
+        horzLines: { color: 'rgba(43, 47, 53, 0.5)' },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(43, 47, 53, 0.5)',
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.2,
+        },
+      },
+      timeScale: {
+        borderColor: 'rgba(43, 47, 53, 0.5)',
+        timeVisible: true,
+        secondsVisible: timeframe === '1s',
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: {
+          color: 'rgba(250, 204, 21, 0.3)',
+          width: 1,
+          style: 3,
+          labelBackgroundColor: '#facc15',
+        },
+        horzLine: {
+          color: 'rgba(250, 204, 21, 0.3)',
+          width: 1,
+          style: 3,
+          labelBackgroundColor: '#facc15',
+        },
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: 550,
+    });
+
+    chartRef.current = chart;
+
+    // Create candlestick series
+    const candlestickOptions: CandlestickSeriesPartialOptions = {
+      upColor: '#0ecb81',
+      downColor: '#f6465d',
+      borderUpColor: '#0ecb81',
+      borderDownColor: '#f6465d',
+      wickUpColor: '#0ecb81',
+      wickDownColor: '#f6465d',
+    };
+    const candlestickSeries = chart.addCandlestickSeries(candlestickOptions);
+
+    candlestickSeriesRef.current = candlestickSeries;
+
+    // Create volume series
+    const volumeOptions: HistogramSeriesPartialOptions = {
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '',
+    };
+    const volumeSeries = chart.addHistogramSeries(volumeOptions);
+
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.8,
+        bottom: 0,
+      },
+    });
+
+    volumeSeriesRef.current = volumeSeries;
+
+    // Handle resize
+    const handleResize = () => {
+      if (chartContainerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: chartContainerRef.current.clientWidth,
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, [symbol, timeframe]);
+
+  // Update data
+  useEffect(() => {
+    if (!data || data.length === 0 || !candlestickSeriesRef.current || !volumeSeriesRef.current) {
+      return;
+    }
+
+    // Convert data to lightweight-charts format
+    const candleData: CandlestickData[] = data.map(d => ({
+      time: formatTimeToTimestamp(d.ts),
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
+
+    const volumeData: HistogramData[] = data.map((d, index) => {
+      const previousClose = index > 0 ? data[index - 1].close : d.open;
+      const color = d.close >= previousClose ? 'rgba(14, 203, 129, 0.5)' : 'rgba(246, 70, 93, 0.5)';
+      
+      return {
+        time: formatTimeToTimestamp(d.ts),
+        value: d.volume || 0,
+        color,
+      };
+    });
+
+    // Set data
+    candlestickSeriesRef.current.setData(candleData);
+    volumeSeriesRef.current.setData(volumeData);
+
+    // Fit content
+    if (chartRef.current) {
+      chartRef.current.timeScale().fitContent();
+    }
+  }, [data]);
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[550px] flex items-center justify-center text-muted-foreground bg-slate-950/50 rounded-lg">
+        <div className="text-center">
+          <p className="text-lg">No data available</p>
+          <p className="text-sm text-slate-500 mt-1">Start streaming to see live data</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <div ref={chartContainerRef} className="w-full h-[550px]" />;
+});
+
+ChartCanvas.displayName = 'ChartCanvas';
+
+const PriceChartComponent = ({
+  data,
+  symbol,
+  timeframe,
+  onTimeframeChange,
+  timeframeOptions = DEFAULT_TIMEFRAME_OPTIONS,
+  isLive = false,
+  onStartLive,
+  onStopLive,
+  showLiveToggle = true,
+  tickerData = null,
+}: PriceChartProps) => {
+  const [isWatchlisted, setIsWatchlisted] = useState(false);
+
+  const handleTimeframeClick = useCallback(
+    (value: string) => {
+      if (onTimeframeChange && value !== timeframe) {
+        onTimeframeChange(value);
+      }
+    },
+    [onTimeframeChange, timeframe]
+  );
+
+  const handleLiveToggle = useCallback(() => {
+    if (isLive && onStopLive) {
+      onStopLive();
+    } else if (!isLive && onStartLive) {
+      onStartLive();
+    }
+  }, [isLive, onStartLive, onStopLive]);
+
+  const handleToggleWatchlist = useCallback(() => {
+    setIsWatchlisted(prev => !prev);
+  }, []);
+
+  const meta = useMemo(() => getAssetMeta(symbol), [symbol]);
+  const liveTicker = isLive && tickerData ? tickerData : null;
+
+  const summary = useMemo(() => {
+    if (!liveTicker) {
+      return null;
+    }
+
+    return {
+      price: liveTicker.lastPrice,
+      change: liveTicker.priceChange,
+      changePercent: liveTicker.priceChangePercent,
+      high: liveTicker.highPrice,
+      low: liveTicker.lowPrice,
+      volume: liveTicker.volume,
+    };
+  }, [liveTicker]);
+
+  const hasLiveSummary = Boolean(summary);
+
+  const changeBadgeClass = useMemo(() => {
+    if (!hasLiveSummary) return 'bg-slate-800 text-slate-400';
+    return summary!.changePercent >= 0
+      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+      : 'bg-rose-500/20 text-rose-400 border-rose-500/40';
+  }, [hasLiveSummary, summary]);
+
+  const stats = useMemo(
+    () => [
+      {
+        label: 'Market cap',
+        value:
+          hasLiveSummary && typeof meta.marketCap === 'number'
+            ? formatCompactCurrency(meta.marketCap)
+            : '--',
+        change:
+          hasLiveSummary && typeof meta.marketCapChange === 'number'
+            ? meta.marketCapChange
+            : undefined,
+      },
+      {
+        label: '24h Vol',
+        value:
+          hasLiveSummary && typeof meta.volume24h === 'number'
+            ? formatCompactCurrency(meta.volume24h)
+            : '--',
+        change:
+          hasLiveSummary && typeof meta.volume24hChange === 'number'
+            ? meta.volume24hChange
+            : undefined,
+      },
+      {
+        label: 'FDV',
+        value:
+          hasLiveSummary && typeof meta.fullyDilutedValuation === 'number'
+            ? formatCompactCurrency(meta.fullyDilutedValuation)
+            : '--',
+      },
+      {
+        label: 'Vol/Mkt Cap (24h)',
+        value:
+          hasLiveSummary && meta.marketCap && meta.volume24h
+            ? `${formatNumber((meta.volume24h / meta.marketCap) * 100, 2)}%`
+            : '--',
+        muted: true,
+      },
+      {
+        label: 'Total supply',
+        value:
+          meta.totalSupply !== undefined && meta.totalSupply !== null
+            ? `${formatCompactNumber(meta.totalSupply)} ${meta.ticker}`
+            : '?',
+      },
+      {
+        label: 'Circulating supply',
+        value:
+          meta.circulatingSupply !== undefined && meta.circulatingSupply !== null
+            ? `${formatCompactNumber(meta.circulatingSupply)} ${meta.ticker}`
+            : '--',
+      },
+    ],
+    [meta, hasLiveSummary]
+  );
+
+  return (
+    <Card className="bg-gradient-card border-border/50 shadow-card overflow-hidden">
+      <CardHeader className="space-y-6 bg-slate-900/40 border-b border-border/40">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <AssetLogo symbol={symbol} size="lg" />
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xl font-semibold text-foreground">
+                  {meta.name}
+                </span>
+                <Badge variant="secondary">{meta.ticker}</Badge>
+                {typeof meta.rank === 'number' && (
+                  <Badge variant="outline">#{meta.rank}</Badge>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {meta.watchlistCount ? `${meta.watchlistCount} watchlists` : 'Watchlist data unavailable'}
+              </div>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              'rounded-full border border-border/60 bg-slate-950/40',
+              isWatchlisted && 'text-yellow-400'
+            )}
+            onClick={handleToggleWatchlist}
+            aria-label="Toggle watchlist"
+          >
+            {isWatchlisted ? <Star className="h-5 w-5 fill-yellow-400" /> : <StarOff className="h-5 w-5" />}
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <div className="space-y-2">
+            <div className="text-4xl font-semibold tracking-tight text-foreground">
+              {hasLiveSummary ? `$$${formatPrice(summary!.price)}` : '--'}
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2 py-1 font-medium text-xs',
+                  changeBadgeClass
+                )}
+              >
+                {hasLiveSummary ? (
+                  summary!.changePercent >= 0 ? (
+                    <ArrowUpRight className="h-4 w-4" />
+                  ) : (
+                    <ArrowDownRight className="h-4 w-4" />
+                  )
+                ) : (
+                  <Dot className="h-4 w-4" />
+                )}
+                {hasLiveSummary ? formatSignedPercent(summary!.changePercent) : '--'}
+              </span>
+              <span className="text-xs text-muted-foreground">(24h)</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              24h Low: {hasLiveSummary ? `$$${formatPrice(summary!.low)}` : '--'} • High: {hasLiveSummary ? `$$${formatPrice(summary!.high)}` : '--'} • Volume: {hasLiveSummary ? formatCompactNumber(summary!.volume, 2) : '--'}
+            </div>
+          </div>
+
+          {showLiveToggle && (
+            <div className="flex items-center gap-3">
+              <Badge
+                variant="outline"
+                className={cn(
+                  'flex items-center gap-1 border border-border/60 text-xs',
+                  isLive ? 'text-emerald-400 border-emerald-500/40' : 'text-muted-foreground'
+                )}
+              >
+                <Dot className={cn('h-4 w-4', isLive ? 'text-emerald-400 animate-pulse' : 'text-muted-foreground')} />
+                {isLive ? 'Live updating' : 'Live paused'}
+              </Badge>
+              <Button
+                variant={isLive ? 'secondary' : 'default'}
+                onClick={handleLiveToggle}
+                className="min-w-[104px]"
+              >
+                {isLive ? 'Stop live' : 'Start live'}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {hasLiveSummary ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {stats.map((stat, index) => (
+              <div key={index} className="rounded-lg border border-border/40 bg-slate-900/60 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                  {stat.label}
+                </div>
+                <div className={cn('text-sm font-semibold text-foreground', stat.muted && 'text-muted-foreground')}>
+                  {stat.value}
+                </div>
+                {typeof stat.change === 'number' && !stat.muted && (
+                  <div
+                    className={cn(
+                      'text-[11px] font-medium flex items-center gap-1',
+                      stat.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    )}
+                  >
+                    {stat.change >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                    {formatSignedPercent(stat.change)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border/40 bg-slate-900/40 p-4 text-xs text-muted-foreground">
+            Live market stats are available when streaming is active.
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="pt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-slate-900/60 p-1">
+            {timeframeOptions.map(option => (
+              <button
+                key={option.value}
+                className={cn(
+                  'px-3 py-1 text-xs font-medium rounded-full transition-colors',
+                  timeframe === option.value
+                    ? 'bg-slate-800 text-foreground shadow'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={() => handleTimeframeClick(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Drag to pan • Scroll to zoom • Double-click to reset
+          </div>
+        </div>
+        <ChartCanvas data={data} symbol={symbol} timeframe={timeframe} />
+      </CardContent>
+    </Card>
+  );
+};
+
+export const PriceChart = PriceChartComponent;

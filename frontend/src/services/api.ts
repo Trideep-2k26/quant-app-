@@ -1,8 +1,5 @@
 import axios from 'axios';
 import { API_BASE_URL } from '@/utils/constants';
-import { mockApi } from './mockData';
-
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'; // Use real backend when VITE_USE_MOCK=false
 
 // Create axios instance
 const api = axios.create({
@@ -15,8 +12,6 @@ const api = axios.create({
 
 // API functions
 export const getSymbols = async (): Promise<string[]> => {
-  if (USE_MOCK) return mockApi.getSymbols();
-  
   try {
     const response = await api.get('/symbols');
     return response.data;
@@ -27,8 +22,6 @@ export const getSymbols = async (): Promise<string[]> => {
 };
 
 export const startStream = async (symbols: string[], tickMode = true) => {
-  if (USE_MOCK) return mockApi.startStream({ symbols, tick_mode: tickMode });
-  
   try {
     const response = await api.post('/stream/start', {
       symbols,
@@ -42,8 +35,6 @@ export const startStream = async (symbols: string[], tickMode = true) => {
 };
 
 export const stopStream = async (symbols: string[]) => {
-  if (USE_MOCK) return mockApi.stopStream({ symbols });
-  
   try {
     const response = await api.post('/stream/stop', { symbols });
     return response.data;
@@ -59,8 +50,6 @@ export const getData = async (
   from?: string,
   to?: string
 ) => {
-  if (USE_MOCK) return mockApi.getData(symbol, timeframe, from, to);
-  
   try {
     const response = await api.get(`/data/${symbol}`, {
       params: { tf: timeframe, from, to },
@@ -78,8 +67,6 @@ export const getAnalytics = async (
   window: number = 60,
   regression: string = 'OLS'
 ) => {
-  if (USE_MOCK) return mockApi.getAnalytics(pair);
-  
   try {
     const response = await api.get('/analytics/pair', {
       params: { pair, tf: timeframe, window, regression },
@@ -97,10 +84,6 @@ export const postAlert = async (alertData: {
   op: string;
   value: number;
 }) => {
-  if (USE_MOCK) {
-    return { id: `alert-${Date.now()}`, active: true, ...alertData };
-  }
-  
   try {
     const response = await api.post('/alerts', alertData);
     return response.data;
@@ -115,12 +98,6 @@ export const exportData = async (
   timeframe: string = '1m',
   format: string = 'csv'
 ) => {
-  if (USE_MOCK) {
-    // Generate CSV from mock data
-    const data = await mockApi.getAnalytics(pair);
-    return data;
-  }
-  
   try {
     const response = await api.get('/export', {
       params: { pair, tf: timeframe, format },
