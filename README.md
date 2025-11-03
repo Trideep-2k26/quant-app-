@@ -16,6 +16,14 @@
 [🚀 Quick Start](#-quick-start) • [📖 Documentation](#-documentation) • [🎯 Features](#-features) • [🏗️ Architecture](#️-architecture)
 
 ---
+## 🎥 Project Demo Video
+
+You can watch or download the demo video from the link below:
+
+👉 [View Demo Video on Google Drive](https://drive.google.com/drive/folders/10oxDa8K1aUi7k8SVdgWdsMMTln-QNfy1?usp=sharing)
+
+
+
 ### 📱 App Preview
 
 ![Screenshot 1](https://trideep-dev.sirv.com/Quant/WhatsApp%20Image%202025-11-03%20at%2013.44.53_9dfc8958.jpg)
