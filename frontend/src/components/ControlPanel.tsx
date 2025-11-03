@@ -53,20 +53,24 @@ export const ControlPanel = ({
 
   const handleSymbolToggle = (symbol: string) => {
     if (selectedSymbols.includes(symbol)) {
-      // Always allow deselecting if more than one selected
+      // Allow deselecting if more than one selected
       if (selectedSymbols.length > 1) {
         onSymbolsChange(selectedSymbols.filter(s => s !== symbol));
+        toast.info(`Removed ${symbol}`);
       } else {
         toast.error('At least one symbol must be selected');
       }
     } else {
-      // Only allow ONE symbol at a time
-      if (selectedSymbols.length < 1) {
+      // Allow up to 2 symbols
+      if (selectedSymbols.length < 2) {
         onSymbolsChange([...selectedSymbols, symbol]);
+        if (selectedSymbols.length === 1) {
+          toast.success(`Added ${symbol} - Analytics enabled!`);
+        } else {
+          toast.info(`Added ${symbol}`);
+        }
       } else {
-        // Replace the current symbol with the new one
-        onSymbolsChange([symbol]);
-        toast.info(`Switched to ${symbol}`);
+        toast.warning('Maximum 2 symbols allowed. Remove one first.');
       }
     }
   };
@@ -123,23 +127,41 @@ export const ControlPanel = ({
       {/* Symbol Selection */}
       <Card className="bg-gradient-card border-border/50 shadow-card">
         <CardHeader>
-          <CardTitle className="text-lg">Symbols</CardTitle>
+          <CardTitle className="text-lg flex items-center justify-between">
+            <span>Symbols</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {selectedSymbols.length}/2 selected
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            {AVAILABLE_SYMBOLS.map(symbol => (
-              <button
-                key={symbol}
-                onClick={() => handleSymbolToggle(symbol)}
-                className={`w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  selectedSymbols.includes(symbol)
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
-                }`}
-              >
-                {symbol}
-              </button>
-            ))}
+          <div className="space-y-3">
+            <div className="space-y-2">
+              {AVAILABLE_SYMBOLS.map(symbol => (
+                <button
+                  key={symbol}
+                  onClick={() => handleSymbolToggle(symbol)}
+                  className={`w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    selectedSymbols.includes(symbol)
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
+                  }`}
+                >
+                  {symbol}
+                </button>
+              ))}
+            </div>
+            
+            {/* Helper message */}
+            <div className="text-xs text-muted-foreground bg-secondary/30 p-2 rounded-md border border-border/30">
+              {selectedSymbols.length === 1 ? (
+                <p>💡 Select 1 more symbol to enable analytics (Z-Score, Spread, ADF)</p>
+              ) : selectedSymbols.length === 2 ? (
+                <p className="text-success">✅ Analytics enabled with 2 symbols</p>
+              ) : (
+                <p>Select 1-2 symbols to view price charts</p>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

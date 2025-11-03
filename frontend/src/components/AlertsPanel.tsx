@@ -27,11 +27,29 @@ export const AlertsPanel = ({ onAddAlert }: AlertsPanelProps) => {
   const [operator, setOperator] = useState('>');
   const [value, setValue] = useState('2');
 
+  // Update pair placeholder when metric changes
+  const handleMetricChange = (newMetric: string) => {
+    setMetric(newMetric);
+    if (newMetric === 'price' && pair.includes('-')) {
+      setPair('BTCUSDT');
+    } else if (newMetric !== 'price' && !pair.includes('-')) {
+      setPair('BTCUSDT-ETHUSDT');
+    }
+  };
+
   const handleAddAlert = () => {
     const numValue = parseFloat(value);
     if (isNaN(numValue)) {
-      toast.error('Invalid value');
+      toast.error('Invalid value - please enter a valid number');
       return;
+    }
+
+    // Validate pair format for comparison metrics
+    if (['zscore', 'spread', 'correlation'].includes(metric)) {
+      if (!pair.includes('-')) {
+        toast.error('Pair format should be SYMBOL1-SYMBOL2 (e.g., BTCUSDT-ETHUSDT) for comparison metrics');
+        return;
+      }
     }
 
     const newAlert: Alert = {
@@ -45,7 +63,8 @@ export const AlertsPanel = ({ onAddAlert }: AlertsPanelProps) => {
 
     setAlerts([...alerts, newAlert]);
     onAddAlert({ metric, pair, operator, value: numValue });
-    toast.success('Alert created');
+    
+    // Don't show toast here - parent component will handle it
   };
 
   const handleRemoveAlert = (id: string) => {
@@ -66,25 +85,28 @@ export const AlertsPanel = ({ onAddAlert }: AlertsPanelProps) => {
         <div className="space-y-3 p-3 rounded-lg bg-secondary/30 border border-border/50">
           <div className="space-y-2">
             <Label className="text-xs">Metric</Label>
-            <Select value={metric} onValueChange={setMetric}>
+            <Select value={metric} onValueChange={handleMetricChange}>
               <SelectTrigger className="h-8 bg-input">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="zscore">Z-Score</SelectItem>
-                <SelectItem value="spread">Spread</SelectItem>
-                <SelectItem value="correlation">Correlation</SelectItem>
+                <SelectItem value="zscore">Z-Score (requires comparison mode)</SelectItem>
+                <SelectItem value="spread">Spread (requires comparison mode)</SelectItem>
+                <SelectItem value="correlation">Correlation (requires comparison mode)</SelectItem>
+                <SelectItem value="price">Price (single symbol)</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2">
-            <Label className="text-xs">Pair</Label>
+            <Label className="text-xs">
+              {metric === 'price' ? 'Symbol' : 'Pair (SYMBOL1-SYMBOL2)'}
+            </Label>
             <Input
               value={pair}
               onChange={(e) => setPair(e.target.value)}
               className="h-8 bg-input text-sm"
-              placeholder="BTCUSDT-ETHUSDT"
+              placeholder={metric === 'price' ? 'BTCUSDT' : 'BTCUSDT-ETHUSDT'}
             />
           </div>
 
@@ -155,6 +177,17 @@ export const AlertsPanel = ({ onAddAlert }: AlertsPanelProps) => {
               </div>
             ))
           )}
+        </div>
+        
+        {/* Info Message */}
+        <div className="text-xs text-muted-foreground bg-secondary/20 p-2 rounded-md border border-border/30">
+          <p className="font-medium mb-1">💡 Alert Tips:</p>
+          <ul className="space-y-1 ml-3">
+            <li>• Z-Score, Spread, Correlation require comparison mode with 2 symbols</li>
+            <li>• Price alerts work in single symbol mode</li>
+            <li>• Alerts are checked in real-time as data streams</li>
+            <li>• You'll receive toast notifications when alerts trigger</li>
+          </ul>
         </div>
       </CardContent>
     </Card>

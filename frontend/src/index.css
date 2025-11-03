@@ -111,6 +111,27 @@ All colors MUST be HSL.
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-primary;
   }
+
+  /* Price ticker flash animations */
+  @keyframes flashGreen {
+    0% { background-color: hsl(142 71% 45% / 0.3); }
+    50% { background-color: hsl(142 71% 45% / 0.5); }
+    100% { background-color: transparent; }
+  }
+
+  @keyframes flashRed {
+    0% { background-color: hsl(354 70% 54% / 0.3); }
+    50% { background-color: hsl(354 70% 54% / 0.5); }
+    100% { background-color: transparent; }
+  }
+
+  .flash-green {
+    animation: flashGreen 500ms ease-out;
+  }
+
+  .flash-red {
+    animation: flashRed 500ms ease-out;
+  }
 }
 
 @layer base {

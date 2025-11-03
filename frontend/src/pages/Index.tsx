@@ -75,7 +75,7 @@ const Index = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [tickCount, setTickCount] = useState(0);
   const [viewMode, setViewMode] = useState<'single' | 'comparison'>('single');
-  const [selectedSymbols, setSelectedSymbols] = useState(['BTCUSDT', 'ETHUSDT']);
+  const [selectedSymbols, setSelectedSymbols] = useState(['BTCUSDT']); // Start with 1 symbol
   const [timeframe, setTimeframe] = useState('1s'); // Default to 1 second for live trading
   const [rollingWindow, setRollingWindow] = useState(20);
   const [regressionType, setRegressionType] = useState('OLS');
@@ -99,9 +99,9 @@ const Index = () => {
   const tickCounterRef = useRef(0);
   const lastTickUpdateRef = useRef(Date.now());
   
-  // Add throttling refs for price updates - Aggressive throttling to prevent flickering
+  // Add throttling refs for price updates - Rapid updates like Binance
   const lastPriceUpdateRef = useRef<Record<string, number>>({});
-  const PRICE_UPDATE_THROTTLE_MS = 2000; // Update charts max 1 time per 2 seconds (ultra smooth, no blinking)
+    const PRICE_UPDATE_THROTTLE_MS = 100; // Throttle for price data updates (100ms = 10 updates/sec for smooth building)
   
   // Pending updates buffer
   const pendingUpdatesRef = useRef<Record<string, {
@@ -151,6 +151,17 @@ const Index = () => {
 
     return bucket.toISOString();
   }, []);
+
+  // Auto-switch to comparison view when 2 symbols are selected
+  useEffect(() => {
+    if (selectedSymbols.length === 2 && isStreaming) {
+      console.log('[ViewMode] Auto-switching to comparison view for 2 symbols');
+      setViewMode('comparison');
+    } else if (selectedSymbols.length !== 2 && viewMode === 'comparison') {
+      console.log('[ViewMode] Switching back to single view');
+      setViewMode('single');
+    }
+  }, [selectedSymbols.length, isStreaming]);
 
   // Fetch initial data for all selected symbols
   useEffect(() => {
@@ -244,7 +255,22 @@ const Index = () => {
           
           // Handle trade/tick messages from backend
           if (message.type === 'trade' || message.type === 'tick') {
-            // Throttle tick count updates to every 100ms to reduce re-renders
+            // Backend sends tick data directly (not in message.data)
+            const tick = message.data || message; // Support both formats
+            const tickSymbol = tick.symbol || message.symbol;
+            const tickPrice = tick.price || message.price;
+            
+            // Validate symbol and price
+            if (!tickSymbol || typeof tickPrice !== 'number') {
+              return;
+            }
+            
+            // Only process ticks for selected symbols
+            if (!selectedSymbols.includes(tickSymbol)) {
+              return; // Ignore ticks from unselected symbols
+            }
+            
+            // Count ticks for selected symbols
             tickCounterRef.current += 1;
             const now = Date.now();
             if (now - lastTickUpdateRef.current > 100) {
@@ -252,16 +278,48 @@ const Index = () => {
               lastTickUpdateRef.current = now;
             }
             
-            // Backend sends tick data directly (not in message.data)
-            const tick = message.data || message; // Support both formats
-            const tickSymbol = tick.symbol || message.symbol;
-            const tickPrice = tick.price || message.price;
-            if (!tickSymbol || typeof tickPrice !== 'number') {
-              return;
-            }
             const tickQty = tick.qty || message.qty || 0;
             const tickTs = tick.ts || message.ts;
             const tickTime = new Date(tickTs);
+            
+            // Update ticker data from trade price (for real-time price display)
+            setTickerData(prev => {
+              const existing = prev[tickSymbol];
+              const lastPrice = tickPrice;
+              
+              // If we have existing data, calculate change from open price
+              if (existing && existing.openPrice) {
+                const priceChange = lastPrice - existing.openPrice;
+                const priceChangePercent = (priceChange / existing.openPrice) * 100;
+                
+                return {
+                  ...prev,
+                  [tickSymbol]: {
+                    ...existing,
+                    lastPrice,
+                    priceChange,
+                    priceChangePercent,
+                    highPrice: Math.max(existing.highPrice || lastPrice, lastPrice),
+                    lowPrice: Math.min(existing.lowPrice || lastPrice, lastPrice),
+                  },
+                };
+              }
+              
+              // Initialize ticker data if not exists
+              return {
+                ...prev,
+                [tickSymbol]: {
+                  lastPrice,
+                  priceChange: 0,
+                  priceChangePercent: 0,
+                  openPrice: lastPrice,
+                  highPrice: lastPrice,
+                  lowPrice: lastPrice,
+                  volume: 0,
+                  quoteVolume: 0,
+                },
+              };
+            });
             
             // Throttle price data updates to reduce re-renders
             const lastUpdate = lastPriceUpdateRef.current[tickSymbol] || 0;
@@ -274,7 +332,7 @@ const Index = () => {
               time: tickTime,
             };
             
-            // Only process if enough time has passed (1000ms throttle for zero flickering)
+            // Only process if enough time has passed (100ms throttle for smooth building)
             if (now - lastUpdate < PRICE_UPDATE_THROTTLE_MS) {
               return; // Skip this update, will use the latest pending update later
             }
@@ -306,11 +364,14 @@ const Index = () => {
                     volume: (last.volume || 0) + pendingUpdate.qty,
                   };
                   
-                  // Check if values actually changed significantly (increased threshold to 0.1 to reduce updates)
-                  const closeChanged = Math.abs(updatedLast.close - last.close) > 0.1;
-                  const highChanged = Math.abs(updatedLast.high - last.high) > 0.1;
-                  const lowChanged = Math.abs(updatedLast.low - last.low) > 0.1;
-                  const volumeChanged = Math.abs(updatedLast.volume - last.volume) > 1;
+                  // Use ultra-sensitive threshold for continuous candle building
+                  const priceThreshold = Math.max(last.close * 0.000001, 0.001); // 0.0001% or minimum 0.001
+                  const volumeThreshold = 0.0001;
+                  
+                  const closeChanged = Math.abs(updatedLast.close - last.close) > priceThreshold;
+                  const highChanged = Math.abs(updatedLast.high - last.high) > priceThreshold;
+                  const lowChanged = Math.abs(updatedLast.low - last.low) > priceThreshold;
+                  const volumeChanged = Math.abs(updatedLast.volume - last.volume) > volumeThreshold;
                   
                   if (!closeChanged && !highChanged && !lowChanged && !volumeChanged) {
                     return prev; // No meaningful change, keep everything stable
@@ -393,10 +454,10 @@ const Index = () => {
 
               setTickerData(prev => {
                 const existing = prev[tickerSymbol];
-                // Only update if price or percent changed significantly (increased threshold to 1.0)
+                // Update with real 24h ticker data (less throttling for smooth updates)
                 if (existing && 
-                    Math.abs(existing.lastPrice - newTickerData.lastPrice) < 1.0 &&
-                    Math.abs(existing.priceChangePercent - newTickerData.priceChangePercent) < 0.1) {
+                    Math.abs(existing.lastPrice - newTickerData.lastPrice) < 0.01 &&
+                    Math.abs(existing.priceChangePercent - newTickerData.priceChangePercent) < 0.01) {
                   return prev; // No meaningful change
                 }
                 
@@ -428,28 +489,40 @@ const Index = () => {
         console.log('WebSocket disconnected');
       };
       
-      // Refresh analytics every 5 seconds when streaming
+      // Refresh analytics every 3 seconds when streaming (increased frequency)
       const fetchAnalytics = async () => {
-        if (selectedSymbols.length >= 1) {
+        if (selectedSymbols.length === 2) { // Only fetch analytics when 2 symbols are selected
           try {
-            // Use single symbol or pair format
-            const pair = selectedSymbols.length === 1 
-              ? `${selectedSymbols[0]}-${selectedSymbols[0]}` // Self-comparison for z-score
-              : `${selectedSymbols[0]}-${selectedSymbols[1]}`; // Pair comparison
+            const pair = `${selectedSymbols[0]}-${selectedSymbols[1]}`; // Pair comparison
             
-            console.log(`[Analytics] Fetching for ${pair} (window: ${rollingWindow}, method: ${regressionType})`);
+            console.log(`[Analytics] Fetching for ${pair} (tf: ${timeframe}, window: ${rollingWindow}, method: ${regressionType})`);
             const analytics = await getAnalytics(pair, timeframe, rollingWindow, regressionType);
             if (analytics) {
               const zscoreCount = analytics.zscore?.length || 0;
               const spreadCount = analytics.spread?.length || 0;
+              const corrCount = analytics.rolling_corr?.length || 0;
               const latestZScore = zscoreCount > 0 ? analytics.zscore[zscoreCount - 1].value : 'N/A';
-              console.log(`[Analytics] Received - Spread points: ${spreadCount}, Z-score points: ${zscoreCount}, Latest Z: ${latestZScore}`);
+              const latestCorr = corrCount > 0 ? analytics.rolling_corr[corrCount - 1].value : 'N/A';
+              const latestSpread = spreadCount > 0 ? analytics.spread[spreadCount - 1].value : 'N/A';
+              console.log(`[Analytics] ✅ Received - Spread: ${spreadCount} points, Z-score: ${zscoreCount} points, Corr: ${corrCount} points`);
+              console.log(`[Analytics] Latest values - Spread: ${latestSpread}, Z: ${latestZScore}, Corr: ${latestCorr}`);
               setAnalyticsData(analytics);
             } else {
-              console.warn('[Analytics] No analytics data received');
+              console.warn('[Analytics] ⚠️ No analytics data received - backend returned null/undefined');
+              setAnalyticsData(null);
             }
           } catch (error) {
-            console.error('Error fetching analytics during stream:', error);
+            console.error('[Analytics] ❌ Error fetching analytics:', error);
+            if (error instanceof Error) {
+              console.error('[Analytics] Error details:', error.message);
+            }
+            setAnalyticsData(null);
+          }
+        } else {
+          // Clear analytics when not 2 symbols
+          if (analyticsData !== null) {
+            console.log(`[Analytics] Clearing analytics (only ${selectedSymbols.length} symbol(s) selected)`);
+            setAnalyticsData(null);
           }
         }
       };
@@ -457,8 +530,8 @@ const Index = () => {
       // Fetch analytics immediately
       fetchAnalytics();
       
-      // Then refresh every 5 seconds
-      analyticsIntervalRef.current = setInterval(fetchAnalytics, 5000);
+      // Then refresh every 3 seconds (increased from 5)
+      analyticsIntervalRef.current = setInterval(fetchAnalytics, 3000);
     } else {
       // Disconnect WebSocket
       if (wsRef.current) {
@@ -544,31 +617,67 @@ const Index = () => {
   };
 
   const handleRunADF = () => {
-    if (analyticsData?.adf) {
-      const { pvalue, stat } = analyticsData.adf;
-      const isStationary = pvalue < 0.05;
-      const strength = pvalue < 0.01 ? 'strongly' : pvalue < 0.05 ? 'weakly' : 'not';
-      
-      const message = isStationary
-        ? `✅ Spread is ${strength} stationary (mean-reverting)\nADF Statistic: ${stat.toFixed(4)}\nP-Value: ${pvalue.toFixed(4)} ${pvalue < 0.01 ? '(< 0.01)' : '(< 0.05)'}`
-        : `⚠️ Spread is NOT stationary\nADF Statistic: ${stat.toFixed(4)}\nP-Value: ${pvalue.toFixed(4)} (> 0.05)\nMean reversion strategy may not be effective`;
-      
-      if (isStationary) {
-        toast.success(message, { duration: 5000 });
-      } else {
-        toast.warning(message, { duration: 5000 });
-      }
+    // Check if streaming and 2 symbols selected
+    if (!isStreaming) {
+      toast.warning('Please start streaming data first');
+      return;
+    }
+    
+    if (selectedSymbols.length !== 2) {
+      toast.warning('ADF test requires exactly 2 symbols. Please select 2 symbols from the left panel.');
+      return;
+    }
+    
+    if (viewMode !== 'comparison') {
+      toast.info('Switching to Analytics View to show ADF test results...');
+      setViewMode('comparison');
+    }
+    
+    if (!analyticsData?.adf) {
+      toast.warning('No ADF data available yet. Analytics are being computed in the background. Please wait a moment and try again.');
+      return;
+    }
+    
+    const { pvalue, stat } = analyticsData.adf;
+    const isStationary = pvalue < 0.05;
+    const strength = pvalue < 0.01 ? 'strongly' : pvalue < 0.05 ? 'weakly' : 'not';
+    
+    const pairName = `${selectedSymbols[0]}-${selectedSymbols[1]}`;
+    const message = isStationary
+      ? `✅ Spread is ${strength} stationary (mean-reverting)\n\nPair: ${pairName}\nADF Statistic: ${stat.toFixed(4)}\nP-Value: ${pvalue.toFixed(4)} ${pvalue < 0.01 ? '(< 0.01)' : '(< 0.05)'}\n\nInterpretation: The spread between the two assets exhibits ${strength} mean-reverting behavior, making it ${strength === 'strongly' ? 'highly' : ''} suitable for pairs trading strategies.`
+      : `⚠️ Spread is NOT stationary\n\nPair: ${pairName}\nADF Statistic: ${stat.toFixed(4)}\nP-Value: ${pvalue.toFixed(4)} (> 0.05)\n\nInterpretation: The spread does not exhibit statistically significant mean-reverting behavior. Mean reversion strategies may not be effective for this pair.`;
+    
+    if (isStationary) {
+      toast.success(message, { duration: 8000 });
     } else {
-      toast.warning('No analytics data available. Start streaming in comparison mode to run ADF test.');
+      toast.warning(message, { duration: 8000 });
     }
   };
 
   const handleAddAlert = async ({ metric, pair, operator, value }: AlertInput) => {
     try {
+      if (!isStreaming) {
+        toast.warning('Please start streaming data before creating alerts');
+        return;
+      }
+      
+      // Validate metric requirements
+      if (['zscore', 'spread', 'correlation'].includes(metric.toLowerCase())) {
+        if (selectedSymbols.length !== 2) {
+          toast.warning(`${metric} alerts require exactly 2 symbols. Please select 2 symbols from the left panel.`);
+          return;
+        }
+        if (!pair.includes('-')) {
+          toast.error('Pair format should be SYMBOL1-SYMBOL2 (e.g., BTCUSDT-ETHUSDT)');
+          return;
+        }
+      }
+      
       await postAlert({ metric, pair, op: operator, value });
-      toast.success('Alert created');
+      toast.success(`Alert created: ${metric} ${operator} ${value} for ${pair}`, { duration: 4000 });
     } catch (error) {
-      toast.error('Failed to create alert');
+      console.error('Failed to create alert:', error);
+      toast.error(`Failed to create alert: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -593,7 +702,12 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar isStreaming={isStreaming} tickCount={tickCount} />
+      <Navbar 
+        isStreaming={isStreaming} 
+        tickCount={tickCount} 
+        selectedSymbols={selectedSymbols}
+        tickerData={tickerData}
+      />
       
       <div className="container mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -621,75 +735,88 @@ const Index = () => {
 
           {/* Right Column - Charts and Stats */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Mode Toggle */}
-            <Card className="bg-gradient-card border-border/50">
-              <CardContent className="pt-6">
-                <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'single' | 'comparison')}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="single">Price Chart</TabsTrigger>
-                    <TabsTrigger value="comparison">Analytics View</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                <p className="text-xs text-muted-foreground mt-2">
-                  {viewMode === 'single' 
-                    ? 'View live candlestick chart with moving averages'
-                    : 'View z-score, spread, correlation and statistical analysis'}
-                </p>
-              </CardContent>
-            </Card>
+            {/* Mode Toggle - Only show when 2 symbols selected */}
+            {selectedSymbols.length === 2 && (
+              <Card className="bg-gradient-card border-border/50">
+                <CardContent className="pt-6">
+                  <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'single' | 'comparison')}>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="single">Price Charts</TabsTrigger>
+                      <TabsTrigger value="comparison">Analytics View</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {viewMode === 'single' 
+                      ? 'View live candlestick charts for both symbols with moving averages'
+                      : 'View z-score, spread, correlation and statistical analysis for the pair'}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
-            {viewMode === 'single' && (
+            {/* Price Charts View */}
+            {(selectedSymbols.length < 2 || viewMode === 'single') && (
               <>
-                {/* Single or Multiple Currency Price Charts */}
-                {selectedSymbols.map((symbol, index) => (
-                  <PriceChart
-                    key={symbol}
-                    data={stableChartData[symbol] || []}
-                    symbol={symbol}
-                    timeframe={timeframe}
-                    onTimeframeChange={handleTimeframeChange}
-                    isLive={isStreaming}
-                    onStartLive={index === 0 ? handleStartStream : undefined}
-                    onStopLive={index === 0 ? handleStopStream : undefined}
-                    tickerData={tickerData[symbol] || null}
-                  />
-                ))}
+                {selectedSymbols.length === 0 ? (
+                  <Card className="bg-gradient-card border-border/50 shadow-card">
+                    <CardContent className="flex items-center justify-center h-[500px]">
+                      <div className="text-center text-muted-foreground">
+                        <p className="text-lg mb-2">No symbols selected</p>
+                        <p className="text-sm">Select 1 or 2 symbols from the left panel to view charts</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <>
+                    {/* Show Price Chart for each selected symbol */}
+                    {selectedSymbols.map((symbol, index) => (
+                      <PriceChart
+                        key={symbol}
+                        data={stableChartData[symbol] || []}
+                        symbol={symbol}
+                        timeframe={timeframe}
+                        onTimeframeChange={handleTimeframeChange}
+                        isLive={isStreaming}
+                        onStartLive={index === 0 ? handleStartStream : undefined}
+                        onStopLive={index === 0 ? handleStopStream : undefined}
+                        tickerData={tickerData[symbol] || null}
+                      />
+                    ))}
+                  </>
+                )}
               </>
             )}
 
-            {viewMode === 'comparison' && (
+            {/* Analytics View - Only available with 2 symbols */}
+            {selectedSymbols.length === 2 && viewMode === 'comparison' && (
               <>
                 {/* Stats Cards for Analytics */}
-                {selectedSymbols.length >= 1 && (
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <StatsCard title="Spread" value={currentSpread} decimals={2} />
-                    <StatsCard title="Z-Score" value={currentZScore} decimals={2} />
-                    <StatsCard title="Correlation" value={currentCorr} decimals={4} />
-                    <StatsCard title="ADF p-value" value={adfPValue} decimals={4} />
-                  </div>
-                )}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <StatsCard title="Spread" value={currentSpread} decimals={2} />
+                  <StatsCard title="Z-Score" value={currentZScore} decimals={2} />
+                  <StatsCard title="Correlation" value={currentCorr} decimals={4} />
+                  <StatsCard title="ADF p-value" value={adfPValue} decimals={4} />
+                </div>
 
                 {/* Spread & Z-Score Detail Chart */}
-                {selectedSymbols.length >= 1 && analyticsData && analyticsData.spread && analyticsData.spread.length > 0 && (
+                {analyticsData && analyticsData.spread && analyticsData.spread.length > 0 ? (
                   <SpreadChart
                     spread={analyticsData.spread}
                     zscore={analyticsData.zscore}
                     pair={analyticsData.pair}
                   />
-                )}
-                
-                {/* Show message if no analytics yet */}
-                {selectedSymbols.length >= 1 && (!analyticsData || !analyticsData.spread || analyticsData.spread.length === 0) && (
+                ) : (
                   <Card className="bg-gradient-card border-border/50 shadow-card">
                     <CardHeader>
                       <CardTitle className="text-lg">
-                        Spread & Z-Score - {selectedSymbols[0]}{selectedSymbols[1] ? `-${selectedSymbols[1]}` : ''}
+                        Spread & Z-Score - {selectedSymbols[0]}-{selectedSymbols[1]}
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="flex items-center justify-center h-[400px]">
                       <div className="text-center text-muted-foreground">
-                        <p className="text-lg mb-2">Collecting data...</p>
+                        <p className="text-lg mb-2">📊 Collecting data...</p>
                         <p className="text-sm">Analytics will appear once enough historical data is loaded</p>
+                        <p className="text-xs mt-2 text-muted-foreground/70">This usually takes 10-30 seconds after starting stream</p>
                       </div>
                     </CardContent>
                   </Card>

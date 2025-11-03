@@ -19,7 +19,7 @@ import {
 import { getAssetMeta } from '@/utils/assets';
 
 const MOVING_AVERAGE_WINDOWS = [7, 25, 99] as const;
-const MOVING_AVERAGE_COLORS = ['#facc15', '#c084fc', '#60a5fa']; // Yellow, purple, blue like Binance
+const MOVING_AVERAGE_COLORS = ['#facc15', '#c084fc', '#60a5fa'];
 const DEFAULT_TIMEFRAME_OPTIONS = [
   { value: '1s', label: '1s' },
   { value: '1m', label: '1m' },
@@ -84,7 +84,7 @@ const computeSMA = (values: number[], window: number): Array<number | null> => {
 
   return result;
 };
-const computeCandleWidth = (timestamps: string[], timeframe: string): number | undefined => {
+const computeCandleWidth = (timestamps: string[], timeframe: string, visibleCandleCount?: number): number | undefined => {
   if (!timestamps || timestamps.length < 2) return undefined;
 
   const deltas: number[] = [];
@@ -101,9 +101,43 @@ const computeCandleWidth = (timestamps: string[], timeframe: string): number | u
 
   const average = deltas.reduce((acc, value) => acc + value, 0) / deltas.length;
   
-  // For 1s timeframe, keep thick candles (0.90)
-  // For other timeframes (1m, 5m, etc.), make narrower candles (0.35)
-  const widthMultiplier = timeframe === '1s' ? 0.90 : 0.35;
+  // Dynamic width based on zoom level - smooth continuous scaling
+  let widthMultiplier: number;
+  if (timeframe === '1s') {
+    // 1 second: Wide candles like Binance - perfect balance between width and spacing
+    widthMultiplier = 0.75; // Optimal for 1s - wide but not overlapping
+  } else {
+    // Smooth continuous scaling based on visible candle count
+    if (visibleCandleCount) {
+      // Use logarithmic scaling for smooth transitions
+      // Binance/Groww style: very narrow candles, tight spacing - professional look
+      // Maps: 20 candles -> 0.28, 50 -> 0.22, 100 -> 0.18, 200 -> 0.12, 500+ -> 0.08
+      const minWidth = 0.08; // Very narrow for professional Binance/Groww look
+      const maxWidth = 0.28; // Much lower max for slim candles
+      
+      // Inverse logarithmic function for smooth zoom response
+      if (visibleCandleCount <= 20) {
+        // Very zoomed in - maximum width
+        widthMultiplier = maxWidth;
+      } else if (visibleCandleCount >= 500) {
+        // Very zoomed out - minimum width
+        widthMultiplier = minWidth;
+      } else {
+        // Smooth interpolation using logarithmic curve
+        // This provides natural feeling zoom transitions
+        const logMin = Math.log(20);
+        const logMax = Math.log(500);
+        const logCurrent = Math.log(visibleCandleCount);
+        const normalizedPosition = (logCurrent - logMin) / (logMax - logMin);
+        
+        // Interpolate width (inverted - more candles = narrower)
+        widthMultiplier = maxWidth - (normalizedPosition * (maxWidth - minWidth));
+      }
+    } else {
+      // Default width when zoom level unknown - very narrow for Binance/Groww style
+      widthMultiplier = 0.12;
+    }
+  }
   
   return average * widthMultiplier;
 };
@@ -118,8 +152,10 @@ const MAX_VISIBLE_CANDLES = 500;
 
 const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
   const [candleWidth, setCandleWidth] = useState<number | undefined>();
+  const [visibleCandleCount, setVisibleCandleCount] = useState<number | undefined>();
   const prevDataRef = useRef<PriceData[]>([]);
   const plotRef = useRef<PlotlyHTMLElement | null>(null);
+  const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const visibleData = useMemo<PriceData[]>(() => {
     if (!data || data.length === 0) return [];
@@ -136,14 +172,14 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
     }
 
     if (dataLength < 10 || dataLength % 10 === 0) {
-      const width = computeCandleWidth(visibleData.map(candle => candle.ts), timeframe);
+      const width = computeCandleWidth(visibleData.map(candle => candle.ts), timeframe, visibleCandleCount);
       setCandleWidth(width);
     }
-  }, [visibleData, dataLength, timeframe]);
+  }, [visibleData, dataLength, timeframe, visibleCandleCount]);
 
   useEffect(() => {
-    // Reset candle width when symbol or timeframe changes
     setCandleWidth(undefined);
+    setVisibleCandleCount(undefined);
   }, [symbol, timeframe]);
 
   const timestamps = useMemo(() => visibleData.map(candle => candle.ts), [visibleData]);
@@ -153,8 +189,8 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
     return visibleData.map((candle, index) => {
       const previousClose = index > 0 ? visibleData[index - 1].close : candle.open;
       return candle.close >= previousClose
-        ? 'rgba(14, 203, 129, 0.6)' // Binance green - more transparent for volume
-        : 'rgba(246, 70, 93, 0.6)';  // Binance red - more transparent for volume
+        ? 'rgba(14, 203, 129, 0.6)'
+        : 'rgba(246, 70, 93, 0.6)';
     });
   }, [visibleData]);
 
@@ -178,11 +214,11 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
         mode: 'lines',
         x: timestamps,
         y: series,
-        name: `MA(${window})`, // Binance format
+        name: `MA(${window})`,
         line: { 
           color, 
-          width: 1.5, // Thinner like Binance
-          shape: 'linear', // Straight lines, not spline
+          width: 1.5,
+          shape: 'linear',
         },
         hovertemplate: `MA(${window}): %{y:,.2f}<extra></extra>`,
         legendgroup: 'overlays',
@@ -205,12 +241,12 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
         low: visibleData.map(d => d.low),
         close: visibleData.map(d => d.close),
         increasing: {
-          line: { color: '#0ecb81', width: 2 }, // Thick borders like Binance
-          fillcolor: '#0ecb81', // Solid green fill
+          line: { color: '#0ecb81', width: 1 },
+          fillcolor: '#0ecb81',
         },
         decreasing: {
-          line: { color: '#f6465d', width: 2 }, // Thick borders like Binance
-          fillcolor: '#f6465d', // Solid red fill
+          line: { color: '#f6465d', width: 1 },
+          fillcolor: '#f6465d',
         },
         hovertemplate:
           '<b>%{x|%H:%M:%S}</b><br>' +
@@ -221,7 +257,7 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
         name: symbol,
         legendgroup: 'price',
         width: candleWidth,
-        whiskerwidth: 0.3, // Very thin wicks like Binance
+        whiskerwidth: 0.2,
       } as PlotData,
       {
         type: 'bar',
@@ -231,7 +267,7 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
           color: volumeColors,
           line: { width: 0 },
         },
-        opacity: 1, // Full opacity like Binance
+        opacity: 1,
         yaxis: 'y2',
         name: 'Volume',
         legendgroup: 'volume',
@@ -243,101 +279,113 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
     return [...baseTraces, ...movingAverageTraces];
   }, [candleWidth, movingAverageTraces, symbol, timestamps, visibleData, volumeColors]);
 
-  // Get current price for live price line
   const currentPrice = useMemo(() => {
     if (!visibleData || visibleData.length === 0) return null;
     return visibleData[visibleData.length - 1].close;
   }, [visibleData]);
 
-  // Add live price indicator line
+  const currentCandle = useMemo(() => {
+    if (!visibleData || visibleData.length === 0) return null;
+    return visibleData[visibleData.length - 1];
+  }, [visibleData]);
+
   const chartDataWithPriceLine = useMemo<PlotData[]>(() => {
-    if (!currentPrice || !timestamps || timestamps.length === 0) return chartData;
+    if (!currentPrice || !timestamps || timestamps.length === 0 || !currentCandle) return chartData;
     
-    const priceLineTrace: PlotData = {
+    // Determine if price is bullish or bearish based on previous candle
+    const prevCandle = visibleData.length >= 2 ? visibleData[visibleData.length - 2] : currentCandle;
+    const isPriceUp = currentPrice >= prevCandle.close;
+    const priceLineColor = isPriceUp ? '#0ecb81' : '#f6465d'; // Green if up, red if down
+    
+    // Dynamic last price line - matches candle color (red/green)
+    const lastPriceLineTrace: PlotData = {
       type: 'scatter',
-      mode: 'lines',
+      mode: 'lines+text',
       x: [timestamps[0], timestamps[timestamps.length - 1]],
       y: [currentPrice, currentPrice],
       line: {
-        color: '#facc15', // Binance yellow
+        color: priceLineColor,
         width: 2,
-        dash: 'dot',
+        dash: 'dash',
       },
-      hovertemplate: `<b>Current Price:</b> $${currentPrice.toFixed(2)}<extra></extra>`,
+      text: [``, `$${currentPrice.toFixed(2)}`], // Show price at the end
+      textposition: 'middle right',
+      textfont: {
+        color: '#ffffff',
+        size: 11,
+        family: 'Roboto, monospace',
+      },
+      hovertemplate: `<b>Last Price:</b> $${currentPrice.toFixed(2)}<br><b>${isPriceUp ? '↑ Up' : '↓ Down'}</b><extra></extra>`,
       showlegend: false,
-      name: 'Live Price',
+      name: 'Last Price',
+      yaxis: 'y',
+    } as PlotData;
+
+    // Skip live candle indicator for 1s timeframe
+    if (timeframe === '1s') {
+      return [...chartData, lastPriceLineTrace];
+    }
+    
+    // Live candle building indicator - vertical line showing real-time price
+    const lastTimestamp = timestamps[timestamps.length - 1];
+    const isBullish = currentCandle.close >= currentCandle.open;
+    const lineColor = isBullish ? '#0ecb81' : '#f6465d'; // Green if bullish, red if bearish
+    
+    // Vertical line from open to current price (shows live building)
+    const liveCandleIndicator: PlotData = {
+      type: 'scatter',
+      mode: 'lines+markers',
+      x: [lastTimestamp, lastTimestamp],
+      y: [currentCandle.open, currentPrice],
+      line: {
+        color: lineColor,
+        width: 3,
+      },
+      marker: {
+        size: 6,
+        color: lineColor,
+        symbol: 'circle',
+        line: {
+          color: '#161a1e',
+          width: 1,
+        },
+      },
+      hovertemplate: 
+        `<b>Live Building</b><br>` +
+        `Open: $${currentCandle.open.toFixed(2)}<br>` +
+        `Current: $${currentPrice.toFixed(2)}<br>` +
+        `Direction: ${isBullish ? '↑ Bullish' : '↓ Bearish'}<extra></extra>`,
+      showlegend: false,
+      name: 'Live Candle',
+      yaxis: 'y',
+    } as PlotData;
+
+    // Pulse effect circle at current price
+    const livePriceMarker: PlotData = {
+      type: 'scatter',
+      mode: 'markers',
+      x: [lastTimestamp],
+      y: [currentPrice],
+      marker: {
+        size: 10,
+        color: lineColor,
+        opacity: 0.6,
+        symbol: 'circle',
+        line: {
+          color: lineColor,
+          width: 2,
+        },
+      },
+      hoverinfo: 'skip',
+      showlegend: false,
+      name: 'Live Price Marker',
+      yaxis: 'y',
     } as PlotData;
     
-    return [...chartData, priceLineTrace];
-  }, [chartData, currentPrice, timestamps]);
+    return [...chartData, lastPriceLineTrace, liveCandleIndicator, livePriceMarker];
+  }, [chartData, currentPrice, timestamps, currentCandle, timeframe, visibleData]);
 
-  const layout = useMemo(() => ({
-    paper_bgcolor: '#161a1e', // Binance dark background
-    plot_bgcolor: '#161a1e', // Match Binance exactly
-    font: { color: '#848e9c', family: 'Roboto, sans-serif' }, // Binance font
-    xaxis: {
-      gridcolor: 'rgba(43, 47, 53, 0.5)', // Binance grid color
-      showgrid: true,
-      type: 'date' as const,
-      zeroline: false,
-      ticksuffix: ' ',
-      rangeslider: { visible: false },
-      showspikes: true,
-      spikecolor: 'rgba(250, 204, 21, 0.6)',
-      spikethickness: 1,
-      spikemode: 'across',
-      tickfont: { size: 11, color: '#848e9c' },
-      tickformat: '%H:%M', // Show only time for intraday
-    },
-    yaxis: {
-      gridcolor: 'rgba(43, 47, 53, 0.5)', // Binance grid color
-      showgrid: true,
-      zeroline: false,
-      tickprefix: '',
-      ticksuffix: ' ',
-      domain: [0.22, 1], // More space for candles
-      color: '#848e9c',
-      tickfont: { size: 11, color: '#848e9c' },
-      side: 'right' as const,
-      fixedrange: false,
-    },
-    yaxis2: {
-      domain: [0, 0.18], // Smaller volume area like Binance
-      showgrid: false,
-      zeroline: false,
-      tickfont: { color: '#848e9c', size: 9 },
-      ticksuffix: ' ',
-      side: 'right' as const,
-      fixedrange: false,
-    },
-    legend: {
-      orientation: 'h',
-      yanchor: 'top',
-      y: 1,
-      xanchor: 'left',
-      x: 0,
-      font: { color: '#848e9c', size: 10 },
-      bgcolor: 'rgba(22, 26, 30, 0.0)',
-    },
-    margin: { l: 10, r: 65, t: 30, b: 35 }, // Binance margins
-    height: 550, // Taller like Binance
-    hovermode: 'x unified' as const,
-    dragmode: 'pan' as const,
-    showlegend: true,
-    bargap: timeframe === '1s' ? 0.2 : 0.5, // Wider gap for non-1s timeframes to make candles appear narrower
-    bargroupgap: 0,
-    hoverlabel: {
-      bgcolor: '#2b2f35',
-      bordercolor: '#848e9c',
-      font: { color: '#ffffff', size: 11 },
-    },
-    uirevision: `price-chart-${symbol}-${timeframe}`,
-    transition: {
-      duration: 0,
-      easing: 'linear',
-    },
-  }), [symbol, timeframe]);
-
+  // Calculate price range BEFORE layout (needed for Y-axis range)
   const priceRange = useMemo(() => {
     if (!visibleData || visibleData.length === 0) {
       return null;
@@ -355,29 +403,143 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
       return null;
     }
 
-    const spread = Math.max(max - min, 1e-9);
-    const pad = Math.max(spread * 0.05, max * 0.0005, 1e-6);
+    // Binance/TradingView style: 8% padding for clean visibility
+    const spread = Math.max(max - min, max * 0.001);
+    const pad = spread * 0.08; // 8% padding top/bottom
     const lower = min - pad;
     const upper = max + pad;
 
     return [lower, upper] as [number, number];
   }, [visibleData]);
 
+  const layout = useMemo(() => {
+    // Dynamic bargap based on zoom level - smooth continuous scaling
+    let bargap: number;
+    if (timeframe === '1s') {
+      // 1 second: Minimal spacing like Binance (consistent tight gaps)
+      bargap = 0.15; // Optimal for 1s - minimal consistent spacing
+    } else {
+      if (visibleCandleCount) {
+        // Binance/Groww style: very tight spacing for professional look
+        // Maps: 20 candles -> 0.25, 50 -> 0.18, 100 -> 0.12, 200 -> 0.08, 500+ -> 0.05
+        const minBargap = 0.05; // Extremely tight for Binance/Groww professional look
+        const maxBargap = 0.25; // Much lower max for closer packed candles
+        
+        if (visibleCandleCount <= 20) {
+          // Very zoomed in - maximum spacing
+          bargap = maxBargap;
+        } else if (visibleCandleCount >= 500) {
+          // Very zoomed out - minimum spacing
+          bargap = minBargap;
+        } else {
+          // Smooth logarithmic interpolation
+          const logMin = Math.log(20);
+          const logMax = Math.log(500);
+          const logCurrent = Math.log(visibleCandleCount);
+          const normalizedPosition = (logCurrent - logMin) / (logMax - logMin);
+          
+          // Interpolate bargap (inverted - more candles = less spacing)
+          bargap = maxBargap - (normalizedPosition * (maxBargap - minBargap));
+        }
+      } else {
+        bargap = 0.1; // Default bargap - very tight for Binance/Groww style
+      }
+    }
+    
+    return {
+    paper_bgcolor: '#161a1e',
+    plot_bgcolor: '#161a1e',
+    font: { color: '#848e9c', family: 'Roboto, sans-serif' },
+    xaxis: {
+      gridcolor: 'rgba(43, 47, 53, 0.5)',
+      showgrid: true,
+      type: 'date' as const,
+      zeroline: false,
+      ticksuffix: ' ',
+      rangeslider: { visible: false },
+      showspikes: true,
+      spikecolor: 'rgba(250, 204, 21, 0.6)',
+      spikethickness: 1,
+      spikemode: 'across',
+      tickfont: { size: 11, color: '#848e9c' },
+      tickformat: '%H:%M',
+      fixedrange: false, // Allow X-axis zoom and pan - Binance style
+    },
+    yaxis: {
+      gridcolor: 'rgba(43, 47, 53, 0.5)',
+      showgrid: true,
+      zeroline: false,
+      tickprefix: '',
+      ticksuffix: ' ',
+      domain: [0.22, 1],
+      color: '#848e9c',
+      tickfont: { size: 11, color: '#848e9c' },
+      side: 'right' as const,
+      fixedrange: true, // Lock Y-axis - Binance/TradingView style
+      autorange: true, // Auto-scale to visible data
+      range: priceRange || undefined, // Use computed price range
+    },
+    yaxis2: {
+      domain: [0, 0.18],
+      showgrid: false,
+      zeroline: false,
+      tickfont: { color: '#848e9c', size: 9 },
+      ticksuffix: ' ',
+      side: 'right' as const,
+      fixedrange: true, // Lock volume Y-axis too
+      autorange: true,
+    },
+    legend: {
+      orientation: 'h',
+      yanchor: 'top',
+      y: 1,
+      xanchor: 'left',
+      x: 0,
+      font: { color: '#848e9c', size: 10 },
+      bgcolor: 'rgba(22, 26, 30, 0.0)',
+    },
+    margin: { l: 10, r: 65, t: 30, b: 35 },
+    height: 550,
+    hovermode: 'x unified' as const,
+    dragmode: 'pan' as const,
+    showlegend: true,
+    bargap,
+    bargroupgap: 0,
+    hoverlabel: {
+      bgcolor: '#2b2f35',
+      bordercolor: '#848e9c',
+      font: { color: '#ffffff', size: 11 },
+    },
+    uirevision: `price-chart-${symbol}-${timeframe}`,
+    datarevision: dataLength,
+    transition: {
+      duration: 150, // Ultra-fast for rapid price updates (Binance-like)
+      easing: 'ease-out',
+      ordering: 'traces first' as const,
+    },
+  };
+  }, [symbol, timeframe, dataLength, visibleCandleCount, priceRange]);
+
   useEffect(() => {
     return () => {
       plotRef.current = null;
+      // Cleanup zoom timeout on unmount
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
     };
   }, []);
 
   const config = useMemo(() => ({
-    displayModeBar: true,
+    displayModeBar: false,
     displaylogo: false,
     responsive: true,
-    scrollZoom: true,
+    scrollZoom: true, // Enable scroll zoom
     doubleClick: 'reset' as const,
-    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toImage'],
     frameMargins: 0,
-    staticPlot: false, // Allow interactions
+    staticPlot: false,
+    modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d', 'autoScale2d'],
+    modeBarButtonsToAdd: [],
   }), []);
 
   const handleRelayout = useCallback((event: PlotRelayoutEvent) => {
@@ -385,6 +547,12 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
     const end = (event['xaxis.range[1]'] ?? event['xaxis.range1']) as string | undefined;
 
     if (!start || !end) {
+      // Reset to default on autorange
+      if (event['xaxis.autorange']) {
+        setVisibleCandleCount(undefined);
+        const width = computeCandleWidth(visibleData.map(c => c.ts), timeframe);
+        setCandleWidth(width);
+      }
       return;
     }
 
@@ -395,20 +563,57 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
       return;
     }
 
-    const visibleCandles = visibleData.filter(candle => {
-      const ts = Date.parse(candle.ts);
-      return Number.isFinite(ts) && ts >= startMs && ts <= endMs;
-    });
-
-    if (visibleCandles.length < 2) {
-      return;
+    // Debounce rapid zoom events for better performance
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current);
     }
 
-    const updatedWidth = computeCandleWidth(visibleCandles.map(candle => candle.ts), timeframe);
+    zoomTimeoutRef.current = setTimeout(() => {
+      const visibleCandles = visibleData.filter(candle => {
+        const ts = Date.parse(candle.ts);
+        return Number.isFinite(ts) && ts >= startMs && ts <= endMs;
+      });
 
-    if (typeof updatedWidth === 'number' && Number.isFinite(updatedWidth)) {
-      setCandleWidth(updatedWidth);
-    }
+      if (visibleCandles.length < 2) {
+        return;
+      }
+
+      // Update visible candle count for dynamic width/bargap
+      setVisibleCandleCount(visibleCandles.length);
+      
+      // Compute width based on zoom level with smooth logarithmic scaling
+      const updatedWidth = computeCandleWidth(visibleCandles.map(candle => candle.ts), timeframe, visibleCandles.length);
+
+      if (typeof updatedWidth === 'number' && Number.isFinite(updatedWidth)) {
+        setCandleWidth(updatedWidth);
+      }
+      
+      // Auto-update Y-axis range based on visible candles (Binance/TradingView style)
+      if (plotRef.current && visibleCandles.length > 0) {
+        let minPrice = Number.POSITIVE_INFINITY;
+        let maxPrice = Number.NEGATIVE_INFINITY;
+        
+        for (const candle of visibleCandles) {
+          if (candle.low < minPrice) minPrice = candle.low;
+          if (candle.high > maxPrice) maxPrice = candle.high;
+        }
+        
+        if (Number.isFinite(minPrice) && Number.isFinite(maxPrice)) {
+          const priceSpread = Math.max(maxPrice - minPrice, maxPrice * 0.001);
+          const padding = priceSpread * 0.08; // 8% padding for better visibility
+          
+          // Update Y-axis range without triggering relayout loop
+          const update = {
+            'yaxis.range': [minPrice - padding, maxPrice + padding],
+            'yaxis.autorange': false,
+          };
+          
+          if (plotRef.current.layout) {
+            Object.assign(plotRef.current.layout, update);
+          }
+        }
+      }
+    }, 30); // Reduced to 30ms for more responsive zoom
   }, [visibleData, timeframe]);
 
   if (visibleData.length === 0) {
@@ -438,34 +643,26 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
       style={{ width: '100%', height: '100%' }}
       useResizeHandler
       divId={`plotly-chart-${symbol}-${timeframe}`}
+      revision={dataLength}
     />
   );
 }, (prevProps, nextProps) => {
-  // Custom comparison function to prevent unnecessary re-renders
-  // Return TRUE to skip re-render (props are same)
-  // Return FALSE to re-render (props changed)
-  
-  // Always re-render if symbol or timeframe changed
   if (prevProps.symbol !== nextProps.symbol || prevProps.timeframe !== nextProps.timeframe) {
     return false;
   }
 
-  // If lengths differ by more than 2, update (new candles added)
   if (Math.abs(prevProps.data.length - nextProps.data.length) > 2) {
     return false;
   }
 
-  // Empty arrays are equal
   if (prevProps.data.length === 0 && nextProps.data.length === 0) {
     return true;
   }
 
-  // If no data, don't update
   if (prevProps.data.length === 0 || nextProps.data.length === 0) {
     return false;
   }
 
-  // Compare last candle to detect meaningful changes
   const prevLast = prevProps.data[prevProps.data.length - 1];
   const nextLast = nextProps.data[nextProps.data.length - 1];
 
@@ -473,10 +670,9 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
     return false;
   }
 
-  // Skip re-render if changes are too small (prevents flickering)
-  // Higher thresholds = less frequent updates = smoother chart
-  const priceThreshold = 1.0; // Only update if price changes by $1+
-  const volumeThreshold = 5.0; // Only update if volume changes by 5+
+  // Ultra-sensitive thresholds for rapid Binance-like updates
+  const priceThreshold = 0.0001; // Detect tiniest price changes
+  const volumeThreshold = 0.0001;
   
   const areEqual = (
     prevLast.ts === nextLast.ts &&
@@ -487,7 +683,7 @@ const ChartCanvas = memo(({ data, symbol, timeframe }: ChartCanvasProps) => {
     Math.abs((prevLast.volume || 0) - (nextLast.volume || 0)) < volumeThreshold
   );
 
-  return areEqual; // true = skip render, false = do render
+  return areEqual;
 });
 
 ChartCanvas.displayName = 'ChartCanvas';
